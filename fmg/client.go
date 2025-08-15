@@ -1,17 +1,18 @@
-package fortimanager
+package fmgdevice
 
 import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/terraform-providers/terraform-provider-fortimanager/sdk/auth"
-	forticlient "github.com/terraform-providers/terraform-provider-fortimanager/sdk/sdkcore"
+	"github.com/terraform-providers/terraform-provider-fmgdevice/sdk/auth"
+	forticlient "github.com/terraform-providers/terraform-provider-fmgdevice/sdk/sdkcore"
 )
 
 // Config gets the authentication information from the given metadata
@@ -23,6 +24,8 @@ type Config struct {
 	CABundle      string
 	ScopeType     string
 	Adom          string
+	DeviceName    string
+	DeviceVdom    string
 	ImportOptions *schema.Set
 	FMGType       string
 	WorkspaceMode string
@@ -48,7 +51,7 @@ func (c *Config) CreateClient() (interface{}, error) {
 
 	err := createFMGClient(&fClient, c)
 	if err != nil {
-		return nil, fmt.Errorf("Error create fortimanager client: %v", err)
+		return nil, fmt.Errorf("Error create fmgdevice client: %v", err)
 	}
 
 	return &fClient, nil
@@ -128,6 +131,7 @@ func createFMGClient(fClient *FortiClient, c *Config) error {
 	if config.InsecureSkipVerify == false && auth.CABundle == "" {
 		return fmt.Errorf("Error getting CA Bundle, CA Bundle should be set when insecure is false")
 	}
+	log.Printf("InsecureSkipVerify: %v, insecure %v", config.InsecureSkipVerify, *c.Insecure)
 
 	tr := &http.Transport{
 		TLSClientConfig: config,
