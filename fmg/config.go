@@ -1,4 +1,4 @@
-package fortimanager
+package fmgdevice
 
 import (
 	"fmt"
@@ -6,45 +6,26 @@ import (
 	"math"
 	"net"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	forticlient "github.com/terraform-providers/terraform-provider-fmgdevice/sdk/sdkcore"
 )
 
-func validateConvIPMask2CIDR(oOldIP, oNewIP string) string {
-	if oNewIP != oOldIP {
-		newCvt := convertIP(oNewIP)
-		oldCvt := convertIP(oOldIP)
-		if newCvt == oldCvt {
-			return oOldIP
-		} else {
-			return oNewIP
+func validateConvIPMask2CIDR(oNewIP, oOldIP string) string {
+	if oNewIP != oOldIP && strings.Contains(oNewIP, "/") && strings.Contains(oOldIP, " ") {
+		line := strings.Split(oOldIP, " ")
+		if len(line) >= 2 {
+			ip := line[0]
+			mask := line[1]
+			prefixSize, _ := net.IPMask(net.ParseIP(mask).To4()).Size()
+			return ip + "/" + strconv.Itoa(prefixSize)
 		}
 	}
 	return oOldIP
-}
-
-func convertIP(inputIP string) string {
-	if inputIP == "" {
-		return ""
-	}
-	f := func(c rune) bool {
-		return c != '.' && c != '/' && !unicode.IsNumber(c)
-	}
-	line := strings.FieldsFunc(inputIP, f)
-	if len(line) == 1 {
-		return line[0]
-	} else if len(line) == 2 {
-		ip := line[0]
-		mask := line[1]
-		prefixSize, _ := net.IPMask(net.ParseIP(mask).To4()).Size()
-		return ip + "/" + strconv.Itoa(prefixSize)
-	}
-	return inputIP
 }
 
 func fortiStringValue(t interface{}) string {
@@ -80,26 +61,7 @@ func flattenStringList(v interface{}) interface{} {
 	}
 	vsList := []string{}
 	if cv, ok := v.(string); ok {
-		if strings.Contains(cv, "'") || strings.Contains(cv, "\"") {
-			re := regexp.MustCompile(`['\"].*?['\"]`)
-			comma := re.FindAllString(cv, -1)
-			non_comma := re.Split(cv, -1)
-			for i := range non_comma {
-				cur_list := strings.Split(non_comma[i], ",")
-				for _, item := range cur_list {
-					item = strings.TrimSpace(item)
-					if item != "" {
-						vsList = append(vsList, item)
-					}
-				}
-				if i < len(comma) {
-					cur_item := strings.Trim(comma[i], "'\" ")
-					vsList = append(vsList, cur_item)
-				}
-			}
-		} else {
-			vsList = strings.Split(cv, ",")
-		}
+		vsList = strings.Split(cv, ",")
 	} else if vList, ok := v.([]interface{}); ok {
 		for _, item := range vList {
 			vsList = append(vsList, fmt.Sprintf("%v", item))
@@ -194,20 +156,6 @@ func getStringKey(d *schema.ResourceData, field string) string {
 	return ""
 }
 
-func getScopeKey(d *schema.ResourceData, field string) string {
-	if v, ok := d.GetOkExists(field); ok {
-		if field == "_scope" {
-			if scopeList, ok := v.([]interface{}); ok {
-				scopeContent := scopeList[0].(map[string]interface{})
-				scopeName := scopeContent["name"].(string)
-				scopeVdom := scopeContent["vdom"].(string)
-				return fmt.Sprintf("%v %v", scopeName, scopeVdom)
-			}
-		}
-	}
-	return ""
-}
-
 func getIntKey(d *schema.ResourceData, field string) int {
 	if v, ok := d.GetOkExists(field); ok {
 		if v1, ok := v.(int); ok {
@@ -251,6 +199,26 @@ func adomChecking(c *Config, d *schema.ResourceData) (string, error) {
 
 	err := fmt.Errorf("unknown adom configuration error")
 	return "", err
+}
+
+func getVariable(c *Config, d *schema.ResourceData, varName string) (string, error) {
+	cv := d.Get(varName).(string)
+	if cv != "" {
+		return cv, nil
+	} else {
+		if varName == "device_name" {
+			if c.DeviceName != "" {
+				return c.DeviceName, nil
+			}
+		} else if varName == "device_vdom" {
+			if c.DeviceVdom != "" {
+				return c.DeviceVdom, nil
+			}
+		} else {
+			return "", fmt.Errorf("Unknown variable name: %v", varName)
+		}
+	}
+	return "", fmt.Errorf("Please specify variable %v either on the provider configuration or on the resource configuration.", varName)
 }
 
 func importOptionChecking(c *Config, para string) string {
@@ -324,20 +292,6 @@ func convertV2Ipnetmaskstring(v interface{}) string {
 	return res
 }
 
-func getAdom(d *schema.ResourceData) string {
-	if v, ok := d.GetOk("adom"); ok {
-		if v1, ok := v.(string); ok {
-			return v1
-		}
-	} else {
-		// if global ..... adom exist?
-		// ...
-		return "global"
-	}
-
-	return "global"
-}
-
 func fortiAPISubPartPatch(t interface{}, lgname string) interface{} {
 	if t == nil {
 		return t
@@ -354,10 +308,6 @@ func fortiAPISubPartPatch(t interface{}, lgname string) interface{} {
 func fortiAPIPatch(t interface{}, lgname string) (interface{}, bool) {
 	if t == nil {
 		return nil, false
-		// } else if _, ok := t.(string); ok {
-		// 	return true
-		// } else if _, ok := t.(float64); ok {
-		// 	return true
 	} else if v, ok := t.([]interface{}); ok {
 		if len(v) == 0 {
 			log.Printf("Item is empty - %v", lgname)
@@ -366,9 +316,6 @@ func fortiAPIPatch(t interface{}, lgname string) (interface{}, bool) {
 			if vv, ok := v[0].(string); ok {
 				return vv, true
 			}
-			// else if vv, ok := v[0].(float64); ok {
-			// 	return int(vv), true
-			// }
 		}
 	}
 
@@ -449,20 +396,19 @@ func convintflist2str(v, tfv interface{}) interface{} {
 		vsList := make([]string, len(vList))
 		for i, item := range vList {
 			vsList[i] = strings.TrimSpace(fmt.Sprintf("%v", item))
-			if strings.Contains(vsList[i], ",") {
-				vsList[i] = "'" + vsList[i] + "'"
-			}
 		}
 		if tfv != nil {
 			if tfvs := fmt.Sprintf("%v", tfv); tfvs != "" {
-				tfvList := flattenStringList(tfv).([]string)
+				tfvList := strings.Split(tfvs, ",")
 				if len(tfvList) == len(vsList) {
+					for i, s := range tfvList {
+						tfvList[i] = strings.TrimSpace(s)
+					}
 					tfvDict := make(map[string]bool)
 					for _, item := range tfvList {
 						tfvDict[item] = true
 					}
 					for _, item := range vsList {
-						item = strings.Trim(item, "'\" ")
 						if _, ok := tfvDict[item]; !ok {
 							return strings.Join(vsList[:], ", ")
 						}
@@ -488,10 +434,9 @@ func convstr2list(v, tfv interface{}) interface{} {
 			if len(tfvList) == len(vsList) {
 				tfvDict := make(map[string]bool)
 				for _, item := range tfvList {
-					tfvDict[strings.Trim(fmt.Sprintf("%v", item), "'\" ")] = true
+					tfvDict[strings.TrimSpace(fmt.Sprintf("%v", item))] = true
 				}
 				for _, item := range vsList {
-					item = strings.Trim(item, "'\" ")
 					if _, ok := tfvDict[item]; !ok {
 						return vsList
 					}
@@ -502,6 +447,20 @@ func convstr2list(v, tfv interface{}) interface{} {
 	}
 
 	return vsList
+}
+
+func case_insensitive(v, tfv interface{}) interface{} {
+	if v == nil {
+		return v
+	}
+	if vs, ok := v.(string); ok {
+		if tfvs, ok := tfv.(string); ok {
+			if strings.ToLower(vs) == strings.ToLower(tfvs) {
+				return tfv
+			}
+		}
+	}
+	return v
 }
 
 func convstrlist2str(v interface{}) interface{} {
@@ -603,4 +562,34 @@ func checkScopeId(idStr string) (string, error) {
 func formatPath(inputPath string) string {
 	inputPath = strings.ReplaceAll(inputPath, "//", "/")
 	return strings.Trim(inputPath, "/")
+}
+
+func lockWorkspace(c *forticlient.FortiSDKClient, adomv string) (err error) {
+	// Check lock status
+	maxLoop := 10
+	for _ = range maxLoop {
+		_, err = c.CreateUpdateExecWorkspaceAction(adomv, "lock", "", "") // !!lock device only
+		if err != nil {
+			time.Sleep(time.Second)
+			continue
+		}
+		break
+	}
+
+	return err
+}
+
+func unlockWorkspace(c *forticlient.FortiSDKClient, adomv string) (err error) {
+	// Commit workspace
+	_, err = c.CreateUpdateExecWorkspaceAction(adomv, "commit", "", "")
+	if err != nil {
+		err = fmt.Errorf("Error commit workspace: %v", err)
+		return
+	}
+	// Unlock workspace
+	_, err = c.CreateUpdateExecWorkspaceAction(adomv, "unlock", "", "")
+	if err != nil {
+		err = fmt.Errorf("Error unlock workspace: %v", err)
+	}
+	return err
 }
