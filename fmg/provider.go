@@ -1,12 +1,11 @@
-// Copyright 2020 Fortinet, Inc. All rights reserved.
-// Author: Hongbin Lu (@fgtdev-hblu), Frank Shen (@frankshen01)
+// Copyright 2024 Fortinet, Inc. All rights reserved.
+// Author: Hongbin Lu (@fgtdev-hblu), Xing Li (@lix-fortinet)
 // Documentation:
-// Hongbin Lu (@fgtdev-hblu), Frank Shen (@frankshen01),
-// Xing Li (@lix-fortinet), Yue Wang (@yuew-ftnt)
+// Hongbin Lu (@fgtdev-hblu), Xing Li (@lix-fortinet), Yue Wang (@yuew-ftnt)
 
-// Description: Provider for FortiManager
+// Description: Provider for FortiManager managed devices
 
-package fortimanager
+package fmgdevice
 
 import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -44,13 +43,6 @@ func Provider() *schema.Provider {
 				Description: "",
 			},
 
-			"cabundlefile": {
-				Type:        schema.TypeString,
-				Optional:    true,
-				Default:     "",
-				Description: "CA Bundle file",
-			},
-
 			"scopetype": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
@@ -65,6 +57,23 @@ func Provider() *schema.Provider {
 				Type:     schema.TypeString,
 				Optional: true,
 				Default:  "root",
+			},
+
+			"cabundlefile": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Default:     "",
+				Description: "CA Bundle file",
+			},
+
+			"device_name": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+
+			"device_vdom": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
 			},
 
 			"import_options": &schema.Schema{
@@ -1186,6 +1195,8 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 		CABundle:      d.Get("cabundlefile").(string),
 		ScopeType:     d.Get("scopetype").(string),
 		Adom:          d.Get("adom").(string),
+		DeviceName:    d.Get("device_name").(string),
+		DeviceVdom:    d.Get("device_vdom").(string),
 		ImportOptions: d.Get("import_options").(*schema.Set),
 		FMGType:       d.Get("fmg_type").(string),
 		WorkspaceMode: d.Get("workspace_mode").(string),
@@ -1206,3 +1217,4 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	// Create Client for later connections
 	return config.CreateClient()
 }
+
